@@ -1,10 +1,10 @@
-# 32-bit RISC-V Processor with Radix-4 and Radix-8 Booth Multipliers
+# Design and Implementation of a 32-Bit Pipelined RISC-V Processor with an Efficient Multiplier
 
 ## Project Overview
 
-This project focuses on the design and implementation of a 32-bit RISC-V processor using Verilog HDL and Xilinx Vivado. It explores processor architecture and hardware optimization through single-cycle and pipelined implementations, incorporating Radix-4 and Radix-8 Booth multiplication techniques.
+This project focuses on the design and implementation of a 32-bit pipelined RISC-V processor using Verilog HDL and Xilinx Vivado. It explores a five-stage pipelined architecture and the integration of an efficient multiplier to improve arithmetic operation performance.
 
-The project aims to study processor performance, hardware resource utilization, timing characteristics and the impact of pipelining and optimized multiplication architectures.
+The project investigates processor architecture, pipeline operation, hazard handling and multiplier optimization through RTL design, simulation and FPGA implementation.
 
 ## Key Features
 
