@@ -13,6 +13,7 @@ Final-year team project, Department of ECE, Amrita Vishwa Vidyapeetham, Amritapu
 | [`pipeline_radix4/`](pipeline_radix4) | Pipelined core with a Radix-4 Booth multiplier in EX |
 | [`pipeline_radix8/`](pipeline_radix8) | Pipelined core with a Radix-8 Booth multiplier in EX |
 | [`booth_radix8_standalone/`](booth_radix8_standalone) | Registered Radix-8 multiplier, used to measure multiplier timing |
+| [`booth_radix8_et/`](booth_radix8_et) | Iterative Radix-8 Booth multiplier with **early termination** |
 
 Each folder contains `rtl/` (design), `tb/` (self-checking testbenches), `constraints/` (Vivado XDC) and `run_sim.sh`.
 
@@ -41,6 +42,24 @@ Both are signed 32×32 → 64-bit and combinational, used by `MUL` in the EX sta
 
 `booth_radix8_standalone` wraps a Radix-8 core between input and output registers (one multiplication per clock, 2 register stages). That gives a clean register-to-register path for measuring timing: `Tmin = Ttarget − WNS`, `Fmax = 1000 / Tmin`.
 
+## Early termination (`booth_radix8_et`)
+
+An iterative Radix-8 Booth multiplier that processes one Booth digit (3 multiplier bits) per clock, using a start/done handshake.
+
+- After each step it checks the multiplier bits not yet processed. If they're all sign-extension bits (all 0s after a 0, or all 1s after a 1), every remaining Booth digit is zero, so it **stops early** and releases the product.
+- Worst case is 11 digit steps (12 clocks). Small-magnitude multipliers finish in far fewer.
+- `iter_count` reports how many digits were actually processed.
+
+Average latency measured by the regression testbench (12 clocks without early termination):
+
+| Operand class | Avg latency | Reduction |
+|---|---|---|
+| Random 16-bit multipliers | 6.42 clk | **46.5%** |
+| Powers of two | 8.64 clk | 28.0% |
+| Dense bit patterns | 9.92 clk | 17.3% |
+| Sparse bit patterns | 10.03 clk | 16.4% |
+| Random full 32-bit | 11.71 clk | 2.4% |
+
 ## Verification
 
 All testbenches are self-checking. In any folder, run:
@@ -56,6 +75,7 @@ sh run_sim.sh     # needs Icarus Verilog
 | `pipeline_radix4` | Pipeline + hazards; signed `MUL` incl. negative operands and forwarding; Booth vs. Verilog `*` on **20,004 random and corner-case vectors** | 20/20 pass |
 | `pipeline_radix8` | Same suite with the Radix-8 multiplier, incl. 20,004-vector Booth check | 20/20 pass |
 | `booth_radix8_standalone` | 40 directed corner cases (e.g. `−2³¹ × −2³¹`) plus **3,040 back-to-back and bubbled operations**, 0 errors, 1 result per clock | All pass |
+| `booth_radix8_et` | **12,871 operations** (sign combinations, boundaries, powers of two, sparse/dense patterns, random 4- to 32-bit), checking the product, iteration count against a golden model, latency and the done/busy handshake | 12,871/12,871 pass |
 
 In Vivado, add `rtl/` as design sources, `tb/` as simulation sources and `constraints/` as constraints, then run behavioral simulation with any testbench as top.
 
