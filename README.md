@@ -1,67 +1,75 @@
 # 32-bit RISC-V Processor with Radix-4 and Radix-8 Booth Multipliers
 
-A 32-bit RISC-V (RV32I subset + MUL) processor in Verilog HDL, built in two versions (single-cycle and 5-stage pipelined) and extended with signed Booth multipliers for hardware multiplication. It was designed, simulated and timing-analysed in Xilinx Vivado.
+A 32-bit RISC-V processor (RV32I subset plus `MUL`) in Verilog HDL. It comes in a single-cycle version and a 5-stage pipelined version, and the pipeline is extended with signed Radix-4 and Radix-8 Booth multipliers. Everything was designed, simulated and timing-analysed in Xilinx Vivado (Artix-7).
 
 Final-year team project, Department of ECE, Amrita Vishwa Vidyapeetham, Amritapuri (2026).
 
 ## Repository layout
 
-| Folder | Contents | Status |
-|---|---|---|
-| [`pipeline_radix4/`](pipeline_radix4) | 5-stage pipelined core with a Radix-4 Booth multiplier | ✅ Added |
-| `pipeline_radix8/` | Pipelined core with a Radix-8 Booth multiplier and early termination | Coming soon |
-| `single_cycle/` | Baseline single-cycle core | Coming soon |
+| Folder | Design |
+|---|---|
+| [`single_cycle/`](single_cycle) | Baseline single-cycle core |
+| [`pipeline/`](pipeline) | 5-stage pipelined core with hazard handling |
+| [`pipeline_radix4/`](pipeline_radix4) | Pipelined core with a Radix-4 Booth multiplier in EX |
+| [`pipeline_radix8/`](pipeline_radix8) | Pipelined core with a Radix-8 Booth multiplier in EX |
+| [`booth_radix8_standalone/`](booth_radix8_standalone) | Registered Radix-8 multiplier, used to measure multiplier timing |
 
-Each folder contains `rtl/` (design), `tb/` (self-checking testbenches), `constraints/` (Vivado XDC) and a `run_sim.sh` script.
+Each folder contains `rtl/` (design), `tb/` (self-checking testbenches), `constraints/` (Vivado XDC) and `run_sim.sh`.
 
-## Pipelined core (`pipeline_radix4`)
+## Processor
 
-**Stages:** IF → ID → EX → MEM → WB, with IF/ID, ID/EX, EX/MEM and MEM/WB pipeline registers.
+**Supported instructions:** `ADD`, `SUB`, `AND`, `OR`, `MUL`, `ADDI`, `LW`, `SW`, `BEQ`, `LUI`, `AUIPC`, `JAL` (single-cycle: R-type, `ADDI`, `LW`, `SW`, `BEQ`, `JAL`)
 
-**Supported instructions:** `ADD`, `SUB`, `AND`, `OR`, `MUL`, `ADDI`, `LW`, `SW`, `BEQ`, `LUI`, `AUIPC`, `JAL`
+**Single-cycle core:** program counter, instruction memory, register file, control unit, immediate generator, ALU and data memory. Every instruction completes in one clock.
 
-**Hazard handling**
-- **EX forwarding** (`forwarding_unit.v`) forwards results from EX/MEM and MEM/WB into the ALU inputs, so back-to-back dependent instructions run without stalls.
-- **Load-use stall** (`hazard_unit.v`) inserts a one-cycle bubble when an instruction needs the result of the load just before it.
-- **Early branch resolution in ID** (`branch_comparator.v`, `branch_forward_unit.v`): branches and jumps resolve in the decode stage, with forwarding into the comparator, so a taken branch costs only one flushed instruction.
+**5-stage pipeline:** IF → ID → EX → MEM → WB, with IF/ID, ID/EX, EX/MEM and MEM/WB registers.
+- **EX forwarding** (`forwarding_unit.v`) forwards from EX/MEM and MEM/WB into the ALU, so dependent instructions run back-to-back.
+- **Load-use stall** (`hazard_unit.v`) inserts a one-cycle bubble after a load whose result is needed immediately.
+- **Early branch resolution in ID** (`branch_comparator.v`, `branch_forward_unit.v`): branches and jumps resolve in decode with forwarding into the comparator, so a taken branch flushes only one instruction.
 - **Register-file write-first bypass** covers the WB→ID same-cycle case.
 
-**Radix-4 Booth multiplier** (`booth_radix4_mul.v`)
-- Signed 32×32 → 64-bit, combinational, used by `MUL` in the EX stage
-- 16 partial products from {0, ±M, ±2M}, summed with a **balanced adder tree** (4 levels instead of a 15-deep adder chain) to shorten the critical path
-- **Operand isolation:** the multiplier inputs are held at zero unless a `MUL` is in EX, which cuts switching activity and dynamic power
+## Booth multipliers
+
+| | Radix-4 | Radix-8 |
+|---|---|---|
+| Recoding | 3-bit overlapping groups, digits {0, ±1, ±2} | 4-bit overlapping groups, digits {0, ±1, ±2, ±3, ±4} |
+| Partial products (32-bit) | 16 | 11 |
+| Hard multiple | none | 3M = M + 2M, computed once |
+| Summation | Balanced adder tree (4 levels) | Balanced adder tree (4 levels) |
+
+Both are signed 32×32 → 64-bit and combinational, used by `MUL` in the EX stage. **Operand isolation** keeps the multiplier inputs at zero unless a `MUL` is in EX, which cuts switching activity. The single-cycle and plain pipeline cores use Vivado's `*` operator, which maps to DSP blocks, as the baseline.
+
+`booth_radix8_standalone` wraps a Radix-8 core between input and output registers (one multiplication per clock, 2 register stages). That gives a clean register-to-register path for measuring timing: `Tmin = Ttarget − WNS`, `Fmax = 1000 / Tmin`.
 
 ## Verification
 
-All testbenches are self-checking and print `PASS`/`FAIL`. To run them with Icarus Verilog:
+All testbenches are self-checking. In any folder, run:
 
 ```sh
-cd pipeline_radix4
-sh run_sim.sh
+sh run_sim.sh     # needs Icarus Verilog
 ```
 
-| Testbench | What it checks | Result |
+| Design | Testbenches | Result |
 |---|---|---|
-| `tb_riscv32_pipeline` | ADD, AND, ADDI and LW through the full pipeline | 4/4 pass |
-| `tb_hazards` | EX/MEM forwarding, back-to-back forwarding, load-use stall and forward | 6/6 pass |
-| `tb_booth` | Signed MUL in the pipeline (incl. negative operands and forwarding of MUL results), plus the Booth unit vs. Verilog `*` on **20,004 random and corner-case vectors** (incl. `0x80000000 × 0x80000000`) | 6/6 pass |
-| `tb_mul_waveform` | Standalone multiplier waveform test | 4/4 pass |
+| `single_cycle` | ADD, SUB, MUL, AND, SW, LW; a looping program on the hardware wrapper | 14/14 pass |
+| `pipeline` | Basic pipeline flow, EX/MEM and back-to-back forwarding, load-use stall, a hardware-wrapper program | 24/24 pass |
+| `pipeline_radix4` | Pipeline + hazards; signed `MUL` incl. negative operands and forwarding; Booth vs. Verilog `*` on **20,004 random and corner-case vectors** | 20/20 pass |
+| `pipeline_radix8` | Same suite with the Radix-8 multiplier, incl. 20,004-vector Booth check | 20/20 pass |
+| `booth_radix8_standalone` | 40 directed corner cases (e.g. `−2³¹ × −2³¹`) plus **3,040 back-to-back and bubbled operations**, 0 errors, 1 result per clock | All pass |
 
-In Vivado, add `rtl/` as design sources, `tb/` as simulation sources and `constraints/` as constraints, then run behavioral simulation with the testbench of your choice as top.
+In Vivado, add `rtl/` as design sources, `tb/` as simulation sources and `constraints/` as constraints, then run behavioral simulation with any testbench as top.
 
-## Results (from the project report, Vivado timing analysis)
+## Results (Vivado timing analysis, from the project report)
 
-| Design | Max frequency |
+| Design | Fmax |
 |---|---|
 | Single-cycle core | 60.64 MHz |
 | 5-stage pipelined core | 72.82 MHz (~20% higher) |
 | Radix-4 Booth multiplier | 84.57 MHz |
-| Radix-8 Booth multiplier | 101.13 MHz (~19.6% higher; 11 partial-product groups vs. 16) |
-
-Radix-8 with early termination cuts the average multiply cycle count by up to 46.5% for small operands.
+| Radix-8 Booth multiplier | 101.13 MHz (~19.6% higher than Radix-4) |
 
 ## Notes
 
-- Programs are loaded into instruction memory from the testbenches (hierarchical access in simulation).
-- `riscv32_pipeline_hw.v` is a thin wrapper for implementation that exposes `PC[7:0]` on `debug_out`. For meaningful post-implementation utilization numbers, the instruction memory must hold a real program and more internal state should be routed to outputs. Otherwise Vivado optimises away logic it can't observe.
+- Programs are loaded into instruction memory by the testbenches (or by `PRELOAD` in the single-cycle and pipeline hardware wrappers).
+- `pipeline_radix4/rtl/riscv32_pipeline_hw.v` only exposes `PC[7:0]` and its instruction memory is empty, so Vivado optimises most of that core away during implementation. Use the single-cycle and pipeline wrappers (which preload a program and observe write-back data) as the model for implementation runs.
 - Only `BEQ` is implemented among the conditional branches.
